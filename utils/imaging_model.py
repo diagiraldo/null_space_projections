@@ -56,6 +56,35 @@ def smoothed_box(thickness, pad = None, spacing = None):
         
     return bk
 
+# Change of coordinates
+class ChangeCoord(nn.Module):    
+    def __init__(
+        self, 
+        perm_dims, 
+        dimension='2d',
+    ):
+        super(ChangeCoord, self).__init__()
+
+        self.dimension = dimension
+
+        perm_dims = np.array(perm_dims)
+        inv_perm_dims = np.argsort(perm_dims)
+
+        if self.dimension == '2d':
+            self.permutation = (0, 1, perm_dims[0]+2, perm_dims[1]+2)
+            self.inv_permutation = (0, 1, inv_perm_dims[0]+2, inv_perm_dims[1]+2)
+        elif self.dimension == '3d':
+            self.permutation = (0, 1, perm_dims[0]+2, perm_dims[1]+2, perm_dims[2]+2)
+            self.inv_permutation = (0, 1, inv_perm_dims[0]+2, inv_perm_dims[1]+2, inv_perm_dims[2]+2)
+        else:
+            raise ValueError('dimension not valid')
+
+    def forward(self, x):
+        return torch.permute(x, self.permutation)
+
+    def transpose(self, x):
+        return torch.permute(x, self.inv_permutation)
+
 # Blurring & Donwsampling
 class BlurringDownsampling(nn.Module):
     def __init__(
@@ -141,7 +170,6 @@ class BlurringDownsampling(nn.Module):
     def transpose(self, x):
         
         if self.normalize_kernel: 
-            #x = x*self.integral_blur_kernel
             kt = self.blur_kernel/self.integral_blur_kernel
         else:
             kt = self.blur_kernel
@@ -161,8 +189,51 @@ class BlurringDownsampling(nn.Module):
 
         if self.dimension == '3d':
             y = nn.functional.conv_transpose3d(x, kt, bias=None, stride=self.stride, padding=self.padding)
-            
-        # if self.normalize_kernel: 
-        #     y = y/self.integral_blur_kernel
 
         return y
+    
+class MRIacq(nn.Module):
+    
+    def __init__(
+        self, 
+        perm_dims, 
+        slice_thickness, #in pixel/voxel units
+        slice_spacing, #in pixel/voxel units
+        dimension='3d',
+        slice_model = "smoothed-box",
+        normalize_kernel = True,
+    ):
+        super(MRIacq, self).__init__()
+
+        self.dimension = dimension
+
+        self.R = ChangeCoord(perm_dims, dimension=self.dimension)
+        self.DB = BlurringDownsampling(slice_thickness, slice_spacing, dimension=self.dimension, slice_model = slice_model, normalize_kernel = normalize_kernel)
+ 
+
+    def forward(self, x):
+        y = self.DB(self.R(x))      
+        return y
+
+    def transpose(self, x):
+        y = self.DB.transpose(x)
+        y = self.R.transpose(y)
+        return y
+    
+class ModelList(nn.Module):
+    
+    def __init__(
+        self, 
+        model_list
+    ):
+        super(ModelList, self).__init__()
+        
+        self.model_list = nn.ModuleList(model_list)
+
+    def forward(self, x):
+        y_list = [M(x) for M in self.model_list]
+        return y_list
+
+    def transpose(self, y_list):
+        x = torch.stack([M.transpose(y) for M,y in zip(self.model_list,y_list)]).sum(dim=0)
+        return x

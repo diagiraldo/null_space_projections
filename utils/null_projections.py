@@ -20,13 +20,15 @@ def wilson_barret(
     iteration = 0
     f = x
     r = M(f)
+    norm_r = torch.linalg.norm(torch.cat([torch.flatten(y) for y in r])) 
     
-    if print_info: print(torch.linalg.norm(r))
+    if print_info: print(norm_r)
     
-    while torch.linalg.norm(r) >= tolerance and iteration <= max_iter:
+    while norm_r >= tolerance and iteration <= max_iter:
         iteration += 1
         f = f - step * M.transpose(r)
         r = M(f)
-        if print_info: print(torch.linalg.norm(r))
+        norm_r = torch.linalg.norm(torch.cat([torch.flatten(y) for y in r]))
+        if print_info: print(norm_r)
         
     return f
